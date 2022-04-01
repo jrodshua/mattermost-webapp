@@ -137,7 +137,6 @@ const rhsChannelIDSubscriptionHandler = (() => {
         if (oldChannelID === channelID) {
             return;
         }
-
         if (channelID === '') {
             // to handle closing the RHS
             webSocketClient.unsubscribe(`channels/${oldChannelID}/typing`);
@@ -149,7 +148,6 @@ const rhsChannelIDSubscriptionHandler = (() => {
             }
             webSocketClient.unsubscribe(`channels/${oldChannelID}/typing`);
         }
-
         oldChannelID = channelID;
     };
 })();
