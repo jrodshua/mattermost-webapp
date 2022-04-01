@@ -19,6 +19,8 @@ import {setSystemEmojis} from 'mattermost-redux/actions/emojis';
 import {getConfig} from 'mattermost-redux/selectors/entities/general';
 import {getCurrentUser, isCurrentUserSystemAdmin, checkIsFirstAdmin} from 'mattermost-redux/selectors/entities/users';
 import {getUseCaseOnboarding} from 'mattermost-redux/selectors/entities/preferences';
+import {getCurrentChannelId} from 'mattermost-redux/selectors/entities/channels';
+import {getSelectedChannelId, getSelectedPostId} from 'selectors/rhs';
 
 import {loadRecentlyUsedCustomEmojis} from 'actions/emoji_actions';
 import * as GlobalActions from 'actions/global_actions';
@@ -73,6 +75,7 @@ import TeamSidebar from 'components/team_sidebar';
 import {applyLuxonDefaults} from './effects';
 
 import RootRedirect from './root_redirect';
+import WebSocketClient from 'client/websocket_client';
 
 const CreateTeam = makeAsyncComponent('CreateTeam', LazyCreateTeam);
 const ErrorPage = makeAsyncComponent('ErrorPage', LazyErrorPage);
@@ -106,6 +109,50 @@ const LoggedInRoute = ({component: Component, ...rest}) => (
 );
 
 const noop = () => {}; // eslint-disable-line no-empty-function
+
+const channelIDSubscriptionHandler = (() => {
+    // closure around oldChannelID so that it's persisted across invocations.
+    let oldChannelID = '';
+    return () => {
+        const channelID = getCurrentChannelId(store.getState());
+        if (oldChannelID === channelID || channelID === '') {
+            // nothing has changed or selector returning junk
+            return;
+        }
+        webSocketClient.subscribe(`channels/${channelID}/typing`);
+
+        // first load this'll be blank, skip that unsubscribe case
+        if (oldChannelID !== '') {
+            webSocketClient.unsubscribe(`channels/${oldChannelID}/typing`);
+        }
+        oldChannelID = channelID;
+    };
+})();
+
+const rhsChannelIDSubscriptionHandler = (() => {
+    // closure around oldChannelID so that it's persisted across invocations.
+    let oldChannelID = '';
+    return () => {
+        const channelID = getSelectedChannelId(store.getState());
+        if (oldChannelID === channelID) {
+            return;
+        }
+
+        if (channelID === '') {
+            // to handle closing the RHS
+            webSocketClient.unsubscribe(`channels/${oldChannelID}/typing`);
+        } else {
+            const centerChannelID = getCurrentChannelId(store.getState());
+            if (channelID !== centerChannelID) {
+                // optimization to skip re-subscribing again to the same as the center channel
+                webSocketClient.subscribe(`channels/${channelID}/typing`);
+            }
+            webSocketClient.unsubscribe(`channels/${oldChannelID}/typing`);
+        }
+
+        oldChannelID = channelID;
+    };
+})();
 
 export default class Root extends React.PureComponent {
     static propTypes = {
@@ -177,6 +224,10 @@ export default class Root extends React.PureComponent {
         this.updateWindowSize();
 
         store.subscribe(() => applyLuxonDefaults(store.getState()));
+
+        store.subscribe(channelIDSubscriptionHandler);
+
+        store.subscribe(rhsChannelIDSubscriptionHandler);
     }
 
     onConfigLoaded = () => {
